@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Anemia Detection Web App  
 
 ## Introduction  
@@ -12,3 +13,6 @@ The **Anemia Detection Web App** is a powerful and user-friendly tool designed t
 
 
  
+=======
+# ytn
+>>>>>>> b73977bfd37622162ca654970b81a517c19625b7
