@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: anemia-detection-backend
+    env: python
+    plan: free
+    branch: main
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn gradioApp:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13
+
+  - type: web
+    name: anemia-detection-frontend
+    env: static
+    branch: main
+    buildCommand: echo "No build step needed"
+    staticPublishPath: ./static_frontend
+    routes:
+      - type: static
+        source: /
+        destination: /index.html
+    envVars:
+      - key: BACKEND_API_URL
+        value: https://anemiaweb.onrender.com/predict

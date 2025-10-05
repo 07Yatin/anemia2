@@ -1,0 +1,18 @@
+[33mcommit a92d1bd307c97eba740d7442e7bd1fb03ef9d4e8[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Merge: f2b7102 b73977b
+Author: Yatin Bhovi <yatinbhovi144@gmail.com>
+Date:   Wed Jul 9 10:54:31 2025 +0530
+
+    Resolve merge conflicts
+
+[33mcommit f2b710254c5db6e2fbf04b3db6073345c1093a6c[m[33m ([m[1;31morigin/master[m[33m)[m
+Author: Yatin Bhovi <yatinbhovi144@gmail.com>
+Date:   Wed Jul 9 10:42:12 2025 +0530
+
+    Initial commit
+
+[33mcommit b73977bfd37622162ca654970b81a517c19625b7[m
+Author: 07Yatin <151991318+07Yatin@users.noreply.github.com>
+Date:   Sun Sep 22 23:53:29 2024 +0530
+
+    Delete yat.txt
