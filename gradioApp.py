@@ -9,6 +9,92 @@ import sqlite3
 from datetime import datetime
 import pandas as pd
 import os
+import re
+import tempfile
+
+# --------------------
+# Styling / Theming
+# --------------------
+CUSTOM_CSS = """
+.gradio-container, body {
+    color: #111111 !important;
+}
+.hero {
+    background: linear-gradient(135deg, #ff7a18, #ffb347 60%, #ffd18f);
+    border-radius: 16px;
+    padding: 28px 28px 22px 28px;
+    color: #1f2937;
+    box-shadow: 0 12px 24px rgba(0,0,0,0.08);
+}
+.hero h1 {
+    font-size: 28px;
+    margin: 0 0 4px 0;
+}
+.hero p {
+    margin: 0;
+    opacity: 0.9;
+}
+.card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 14px;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.06);
+}
+.cta-btn button {
+    height: 48px;
+    font-weight: 600;
+    border-radius: 12px !important;
+    color: #111111 !important;
+    background: linear-gradient(135deg, #ffd18f, #ffb347 60%, #ff7a18);
+}
+.cta-btn button span { 
+    color: #111111 !important; 
+    opacity: 1 !important;
+}
+.cta-btn button svg { filter: none !important; }
+.muted-card {
+    background: #f3f4f6;
+    border: 1px dashed #e5e7eb;
+}
+.muted-card button, .card button {
+    color: #111111 !important;
+}
+.gr-button, .gr-button * { color: #111111 !important; }
+.gr-button-primary { color: #111111 !important; }
+.gr-button-primary span { color: #111111 !important; }
+.gr-button { 
+    font-size: 16px !important; 
+    line-height: 1.2 !important; 
+}
+.gr-button > span { 
+    color: #111111 !important; 
+    font-size: 16px !important; 
+    visibility: visible !important; 
+    opacity: 1 !important; 
+    text-indent: 0 !important; 
+    display: inline-flex !important; 
+    align-items: center; 
+    gap: 8px; 
+}
+.gr-button svg { filter: none !important; }
+.gr-markdown, .gr-markdown * { color: #111111 !important; }
+.gradio-container .prose p, .gradio-container .prose h1, .gradio-container .prose h2, .gradio-container .prose h3 {
+    color: #111111 !important;
+}
+.footer {
+    text-align: center;
+    color: #6b7280;
+    font-size: 12px;
+    margin-top: 10px;
+}
+.center-row {
+    justify-content: center !important;
+}
+.narrow-col {
+    max-width: 720px;
+}
+"""
 
 # Database setup
 def setup_database():
@@ -70,20 +156,105 @@ def save_result(hgl, status, image=None):
     conn.commit()
     conn.close()
 
+def parse_hgl_value(hgl_str):
+    try:
+        return float(str(hgl_str).replace('g/dl', '').strip())
+    except Exception:
+        return None
+
+def generate_diet_plan(hgl_value):
+    if hgl_value is None:
+        return "<div class='card'><h4>Diet Plan</h4><p>Unable to determine hemoglobin value.</p></div>"
+    if hgl_value < 7:
+        severity = "Severe Anemia"
+        advice = [
+            "Consult a clinician urgently; supplements/transfusion may be required.",
+            "Daily iron supplement as prescribed.",
+            "Iron-rich foods: liver, red meat, fish, chicken, beans, lentils, tofu, spinach, fortified cereals.",
+            "Add vitamin C sources with meals: citrus, berries, tomatoes, bell peppers.",
+            "Avoid tea/coffee and calcium within 1–2 hours of iron intake."
+        ]
+    elif hgl_value < 10:
+        severity = "Moderate Anemia"
+        advice = [
+            "Begin oral iron per clinician advice.",
+            "Two iron-rich meals per day (see list above).",
+            "Pair iron with vitamin C; cook in cast-iron cookware if available.",
+            "Add B12 (eggs, dairy, fish) and folate (leafy greens, legumes)."
+        ]
+    elif hgl_value < 12:
+        severity = "Mild / Borderline"
+        advice = [
+            "Focus on dietary iron daily (meat/legumes/greens).",
+            "Include vitamin C; limit tea/coffee with meals.",
+            "Consider multivitamin with iron if advised."
+        ]
+    else:
+        severity = "Within Normal Range"
+        advice = [
+            "Maintain balanced diet with regular iron sources 3–4x/week.",
+            "Include B12 and folate sources.",
+            "Stay hydrated; continue periodic checks if recommended."
+        ]
+    items = ''.join([f"<li>{a}</li>" for a in advice])
+    return f"""
+    <div class='card'>
+        <h4>Diet Plan • {severity}</h4>
+        <ul>{items}</ul>
+        <p style='font-size:12px;color:#6b7280'>General guidance only; not medical advice.</p>
+    </div>
+    """
+
+def generate_pdf_report(hgl_value, status, diet_html):
+    try:
+        # Lazy import to avoid hard dependency at module import time
+        from reportlab.lib.pagesizes import letter
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import inch
+        # Build text versions
+        diet_text = re.sub('<[^<]+?>', '', diet_html or '')
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        # Create a persistent file path; Gradio File downloads best from a real path
+        os.makedirs("reports", exist_ok=True)
+        filename = f"reports/anemia_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        abs_path = os.path.abspath(filename)
+        doc = SimpleDocTemplate(abs_path, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = []
+        story.append(Paragraph("Anemia Detection Report", styles['Title']))
+        story.append(Spacer(1, 0.2*inch))
+        story.append(Paragraph(f"Date: {ts}", styles['Normal']))
+        story.append(Paragraph(f"Hemoglobin: {hgl_value if hgl_value is not None else 'N/A'} g/dL", styles['Normal']))
+        story.append(Paragraph(f"Status: {status}", styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        story.append(Paragraph("Diet Plan", styles['Heading2']))
+        story.append(Paragraph(diet_text.replace('\n', '<br/>'), styles['Normal']))
+        doc.build(story)
+        return abs_path
+    except Exception:
+        return None
+
 def process_image_from_upload(image):
     if image is not None:
         img_bytes = numpy_array_to_bytes(image)
         result, status = call_api(img_bytes)
+        hgl_val = parse_hgl_value(result)
+        diet_html = generate_diet_plan(hgl_val)
         save_result(result, status, image)
-        return result, status
+        pdf_path = generate_pdf_report(hgl_val, status, diet_html)
+        return result, status, diet_html, pdf_path
     return "No image uploaded", "Error"
 
 def process_image_from_camera(image):
     if image is not None:
         img_bytes = numpy_array_to_bytes(image)
         result, status = call_api(img_bytes)
+        hgl_val = parse_hgl_value(result)
+        diet_html = generate_diet_plan(hgl_val)
         save_result(result, status, image)
-        return result, status
+        pdf_path = generate_pdf_report(hgl_val, status, diet_html)
+        return result, status, diet_html, pdf_path
     return "No image captured", "Error"
 
 def get_test_history():
@@ -258,7 +429,31 @@ def chat_with_bot(message, history):
         
         "when to see doctor": "See a doctor if you experience: 1) Persistent fatigue, 2) Shortness of breath, 3) Dizziness, 4) Pale skin, 5) Irregular heartbeat, 6) Cold hands and feet.",
         
-        "diet recommendations": "Eat foods rich in: 1) Iron (red meat, beans, spinach), 2) Vitamin B12 (fish, meat, dairy), 3) Folate (leafy greens, citrus fruits), 4) Vitamin C (helps iron absorption)."
+        "diet recommendations": "Eat foods rich in: 1) Iron (red meat, beans, spinach), 2) Vitamin B12 (fish, meat, dairy), 3) Folate (leafy greens, citrus fruits), 4) Vitamin C (helps iron absorption).",
+
+        "normal hgb levels": "Typical hemoglobin ranges: men 13.5–17.5 g/dL, women 12.0–15.5 g/dL, children vary by age. Always interpret with a clinician.",
+        
+        "iron rich foods": "Good sources: red meat, liver, chicken, fish, beans, lentils, tofu, spinach, fortified cereals, pumpkin seeds.",
+
+        "b12 sources": "Vitamin B12 foods: fish, meat, eggs, dairy, fortified cereals. Vegans usually need a B12 supplement.",
+
+        "folate sources": "Folate foods: leafy greens, legumes, asparagus, avocado, citrus fruits, fortified grains.",
+
+        "causes of anemia": "Common causes: iron deficiency, chronic disease, blood loss, B12/folate deficiency, hemolysis, bone marrow problems, inherited conditions (e.g., thalassemia).",
+
+        "anemia in pregnancy": "Pregnancy increases iron needs. Prenatal vitamins with iron/folate are recommended; screening is routine. Follow your obstetrician's guidance.",
+
+        "can anemia cause dizziness": "Yes. Low hemoglobin reduces oxygen delivery, which can cause dizziness, fatigue, headaches, and shortness of breath.",
+
+        "how to increase iron absorption": "Pair iron with vitamin C (e.g., citrus). Avoid tea/coffee and calcium supplements around iron-rich meals.",
+
+        "is my result medical advice": "This app is for screening and education only. It does not replace professional diagnosis or treatment. Consult a licensed clinician.",
+
+        "how accurate is this app": "The model estimates hemoglobin from eye images and has limitations. Lighting, camera quality, and positioning affect results. Use it as a guide, not a diagnosis.",
+
+        "low hemoglobin symptoms": "Fatigue, pallor, shortness of breath, chest discomfort on exertion, cold extremities, brittle nails, hair loss in severe cases.",
+
+        "when to go to er": "Seek urgent care if you have severe shortness of breath, chest pain, fainting, very fast heartbeat, or signs of major bleeding."
     }
     
     # Default response for unknown queries
@@ -281,7 +476,7 @@ def chat_with_bot(message, history):
 upload_interface = gr.Interface(
     fn=process_image_from_upload,
     inputs=gr.Image(label="Upload conjunctiva image"),
-    outputs=[gr.Label(label="Hemoglobin Levels"), gr.Label(label="Status")],
+    outputs=[gr.Label(label="Hemoglobin Levels"), gr.Label(label="Status"), gr.HTML(label="Diet Plan"), gr.File(label="Download Report (PDF)")],
     title="Anemia Detector - Upload Image",
     description="Upload an image of the conjunctiva (the red part under the lower eyelid) to detect anemia and estimate hemoglobin levels."
 )
@@ -293,9 +488,8 @@ camera_interface = gr.Interface(
         label="Capture when conjunctiva is visible",
         type="numpy",
         streaming=False,
-        webcam_options={"mirror_webcam": False}
     ),
-    outputs=[gr.Label(label="Hemoglobin Levels"), gr.Label(label="Status")],
+    outputs=[gr.Label(label="Hemoglobin Levels"), gr.Label(label="Status"), gr.HTML(label="Diet Plan"), gr.File(label="Download Report (PDF)")],
     title="Anemia Detector - Camera Mode",
     description="Position your eye so the conjunctiva (red part under lower eyelid) is visible and take a photo."
 )
@@ -305,51 +499,30 @@ chatbot_interface = gr.ChatInterface(
     fn=chat_with_bot,
     title="Anemia Information Assistant",
     description="Ask questions about anemia, symptoms, prevention, treatment, or how to use this app.",
-    examples=[
-        "What is anemia?",
-        "What are the symptoms of anemia?",
-        "How can I prevent anemia?",
-        "What is hemoglobin?",
-        "How do I use this app?",
-        "What are the risk factors for anemia?",
-        "What should I eat if I have anemia?"
-    ],
+        examples=[
+            "What is anemia?",
+            "What are the symptoms of anemia?",
+            "How can I prevent anemia?",
+            "What is hemoglobin?",
+            "What are the risk factors for anemia?",
+            "What should I eat if I have anemia?",
+            "What are normal Hgb levels?",
+            "Best sources of iron?",
+            "Sources of vitamin B12?",
+            "How to increase iron absorption?",
+            "Is this medical advice?",
+            "How accurate is this app?",
+            "When should I see a doctor?",
+            "Anemia in pregnancy",
+            "Can anemia cause dizziness?"
+        ],
     theme="soft",
     type="messages"
 )
 
-# Create the enhanced history interface
-history_interface = gr.Interface(
-    fn=view_history,
-    inputs=[
-        gr.Textbox(label="Start Date", placeholder="YYYY-MM-DD"),
-        gr.Textbox(label="End Date", placeholder="YYYY-MM-DD"),
-        gr.Number(label="Minimum Hemoglobin Level"),
-        gr.Number(label="Maximum Hemoglobin Level"),
-        gr.Dropdown(["Normal", "Low", "High", "Error"], label="Status Filter", multiselect=True),
-        gr.Radio(["trend", "distribution", "box"], label="Plot Type", value="trend")
-    ],
-    outputs=[
-        gr.Image(label="Hemoglobin Level Analysis"),
-        gr.HTML(label="Test History"),
-        gr.HTML(label="Statistical Analysis")
-    ],
-    title="Test History and Analysis",
-    description="View and analyze your test history with advanced filtering and visualization options."
-)
+## (history interface removed)
 
-# Create download interface with enhanced options
-download_interface = gr.Interface(
-    fn=lambda format, start_date, end_date: download_history(format, start_date, end_date),
-    inputs=[
-        gr.Radio(["CSV", "PDF"], label="Download Format"),
-        gr.Textbox(label="Start Date (YYYY-MM-DD)", placeholder="YYYY-MM-DD"),
-        gr.Textbox(label="End Date (YYYY-MM-DD)", placeholder="YYYY-MM-DD")
-    ],
-    outputs=gr.File(label="Download History"),
-    title="Download Test History",
-    description="Download your test history in CSV or PDF format with date range filtering."
-)
+## (download interface removed)
 
 def validate_date(date_str):
     try:
@@ -360,59 +533,41 @@ def validate_date(date_str):
         return False
 
 def create_main_interface():
-    with gr.Blocks(title="Anemia Detection System") as main_interface:
-        gr.Markdown("# Anemia Detection System")
-        gr.Markdown("Welcome to the Anemia Detection System. Choose an option below to get started.")
+    with gr.Blocks(title="Anemia Detection System", css=CUSTOM_CSS, theme=gr.themes.Soft(primary_hue="orange", secondary_hue="zinc")) as main_interface:
+        with gr.Row(elem_classes=["hero"]):
+            with gr.Column(scale=8):
+                gr.Markdown("# Anemia Detection System")
+                gr.Markdown("Detect anemia and estimate hemoglobin quickly with a modern, friendly interface.")
         
-        with gr.Row():
-            with gr.Column():
+        with gr.Row(elem_classes=["center-row"]):
+            with gr.Column(elem_classes=["narrow-col"]):
                 gr.Markdown("### Test Options")
-                upload_btn = gr.Button("📤 Upload Image", variant="primary")
-                camera_btn = gr.Button("📷 Take Photo", variant="primary")
-                chatbot_btn = gr.Button("💬 Ask Questions", variant="primary")
-            
-            with gr.Column():
-                gr.Markdown("### History & Analysis")
-                history_btn = gr.Button("📊 View History", variant="primary")
-                download_btn = gr.Button("⬇️ Download History", variant="primary")
-                stats_btn = gr.Button("📈 View Statistics", variant="primary")
+                upload_btn = gr.Button("Upload Image", variant="primary") 
+                camera_btn = gr.Button("Take Photo", variant="primary") 
+                chatbot_btn = gr.Button("Ask Questions", variant="primary") 
         
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### Quick Actions")
-                filter_btn = gr.Button("🔍 Filter Results", variant="secondary")
-                export_btn = gr.Button("📤 Export Data", variant="secondary")
-                help_btn = gr.Button("❓ Help & Guide", variant="secondary")
+                help_btn = gr.Button("❓ Help & Guide", variant="secondary", elem_classes=["muted-card"]) 
         
         # Hidden interfaces that will be shown when buttons are clicked
-        with gr.Row(visible=False) as upload_section:
-            upload_interface.render()
+        with gr.Row(visible=False, elem_classes=["card","center-row"]) as upload_section:
+            with gr.Column(elem_classes=["narrow-col"]):
+                upload_interface.render()
         
-        with gr.Row(visible=False) as camera_section:
-            camera_interface.render()
+        with gr.Row(visible=False, elem_classes=["card","center-row"]) as camera_section:
+            with gr.Column(elem_classes=["narrow-col"]):
+                camera_interface.render()
         
-        with gr.Row(visible=False) as chatbot_section:
+        with gr.Row(visible=False, elem_classes=["card"]) as chatbot_section:
             chatbot_interface.render()
         
-        with gr.Row(visible=False) as history_section:
-            history_interface.render()
+        # History/Download sections removed per requirements
         
-        with gr.Row(visible=False) as download_section:
-            download_interface.render()
+        # Filter section removed
         
-        with gr.Row(visible=False) as filter_section:
-            with gr.Column():
-                gr.Markdown("### Filter Results")
-                start_date = gr.Textbox(label="Start Date (YYYY-MM-DD)", placeholder="YYYY-MM-DD")
-                end_date = gr.Textbox(label="End Date (YYYY-MM-DD)", placeholder="YYYY-MM-DD")
-                min_hgl = gr.Number(label="Minimum Hemoglobin Level")
-                max_hgl = gr.Number(label="Maximum Hemoglobin Level")
-                status_filter = gr.Dropdown(["Normal", "Low", "High", "Error"], label="Status Filter", multiselect=True)
-                apply_filter_btn = gr.Button("Apply Filters", variant="primary")
-                filter_results = gr.HTML(label="Filtered Results")
-                date_error = gr.Markdown(visible=False)
-        
-        with gr.Row(visible=False) as help_section:
+        with gr.Row(visible=False, elem_classes=["card"]) as help_section:
             with gr.Column():
                 gr.Markdown("### Help & Guide")
                 gr.Markdown("""
@@ -444,9 +599,7 @@ def create_main_interface():
                 upload_section: gr.update(visible=False),
                 camera_section: gr.update(visible=False),
                 chatbot_section: gr.update(visible=False),
-                history_section: gr.update(visible=False),
-                download_section: gr.update(visible=False),
-                filter_section: gr.update(visible=False),
+                # filter_section removed
                 help_section: gr.update(visible=False)
             }
         
@@ -454,80 +607,29 @@ def create_main_interface():
         upload_btn.click(
             fn=lambda: hide_all_sections() | show_section(upload_section),
             inputs=None,
-            outputs=[upload_section, camera_section, chatbot_section, history_section, 
-                    download_section, filter_section, help_section]
+            outputs=[upload_section, camera_section, chatbot_section, help_section]
         )
         
         camera_btn.click(
             fn=lambda: hide_all_sections() | show_section(camera_section),
             inputs=None,
-            outputs=[upload_section, camera_section, chatbot_section, history_section, 
-                    download_section, filter_section, help_section]
+            outputs=[upload_section, camera_section, chatbot_section, help_section]
         )
         
         chatbot_btn.click(
             fn=lambda: hide_all_sections() | show_section(chatbot_section),
             inputs=None,
-            outputs=[upload_section, camera_section, chatbot_section, history_section, 
-                    download_section, filter_section, help_section]
-        )
-        
-        history_btn.click(
-            fn=lambda: hide_all_sections() | show_section(history_section),
-            inputs=None,
-            outputs=[upload_section, camera_section, chatbot_section, history_section, 
-                    download_section, filter_section, help_section]
-        )
-        
-        download_btn.click(
-            fn=lambda: hide_all_sections() | show_section(download_section),
-            inputs=None,
-            outputs=[upload_section, camera_section, chatbot_section, history_section, 
-                    download_section, filter_section, help_section]
-        )
-        
-        filter_btn.click(
-            fn=lambda: hide_all_sections() | show_section(filter_section),
-            inputs=None,
-            outputs=[upload_section, camera_section, chatbot_section, history_section, 
-                    download_section, filter_section, help_section]
+            outputs=[upload_section, camera_section, chatbot_section, help_section]
         )
         
         help_btn.click(
             fn=lambda: hide_all_sections() | show_section(help_section),
             inputs=None,
-            outputs=[upload_section, camera_section, chatbot_section, history_section, 
-                    download_section, filter_section, help_section]
+            outputs=[upload_section, camera_section, chatbot_section, help_section]
         )
-        
-        # Filter button handler with date validation
-        def apply_filters(start_date, end_date, min_hgl, max_hgl, status_filter):
-            if not validate_date(start_date) or not validate_date(end_date):
-                return {
-                    filter_results: gr.update(value=""),
-                    date_error: gr.update(value="Please enter valid dates in YYYY-MM-DD format", visible=True)
-                }
-            
-            try:
-                start = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
-                end = datetime.strptime(end_date, "%Y-%m-%d") if end_date else None
-                df = get_filtered_history(start, end, min_hgl, max_hgl, status_filter)
-                return {
-                    filter_results: gr.update(value=df.to_html(index=False)),
-                    date_error: gr.update(visible=False)
-                }
-            except Exception as e:
-                return {
-                    filter_results: gr.update(value=""),
-                    date_error: gr.update(value=f"Error applying filters: {str(e)}", visible=True)
-                }
-        
-        apply_filter_btn.click(
-            fn=apply_filters,
-            inputs=[start_date, end_date, min_hgl, max_hgl, status_filter],
-            outputs=[filter_results, date_error]
-        )
+        # Filter logic removed
     
+        gr.Markdown("Made with ❤️ for accessible screening.", elem_classes=["footer"]) 
     return main_interface
 
 # Launch the main interface instead of the tabbed interface

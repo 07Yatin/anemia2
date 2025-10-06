@@ -7,3 +7,4 @@ opencv-python==4.9.0.80
 numpy==1.26.4
 scikit-learn==1.5.2
 uvicorn==0.32.1
+reportlab==4.2.5

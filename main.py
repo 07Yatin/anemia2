@@ -127,5 +127,7 @@ async def acc():
     plt.savefig("confusion_matrix.png")
     plt.close()
     return per
-uvicorn.run(app,port=8081)
+# Only run the server when executing this file directly
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8081)
 # acc()
