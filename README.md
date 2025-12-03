@@ -29,6 +29,12 @@ The **Anemia Detection Web App** is a user-friendly tool for detecting anemia an
 - **User History:** Local storage of flagged results for each user.
 - **Anemia Chatbot:** Ask questions about anemia, symptoms, prevention, and more.
 
+## Documentation
+- Setup (Windows): `docs/SETUP_WINDOWS.md`
+- Run Guide: `docs/RUN_GUIDE.md`
+- Troubleshooting: `docs/TROUBLESHOOTING.md`
+- Project Structure: `docs/PROJECT_STRUCTURE.md`
+
 ## Project Structure
 - `main.py` — FastAPI backend for model inference (runs on port 8081)
 - `gradioApp.py` — Gradio frontend web app

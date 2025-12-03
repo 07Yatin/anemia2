@@ -1,7 +1,8 @@
 import logging
 import warnings
 import uvicorn
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Depends, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 import cv2
 import numpy as np
@@ -29,11 +30,43 @@ logging.basicConfig(
 
 app = FastAPI()
 
+# CORS for React dev servers
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "*" if os.getenv("CORS_ALLOW_ALL") == "1" else "http://localhost"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Global variables for models
 model = None
 ANN = None
 scaler = None
 tar_scaler = None
+
+import jwt
+
+JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret")
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "1") == "1"
+
+def verify_token(authorization: str = Header(default="")):
+    if not AUTH_ENABLED:
+        return True
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization.split(" ", 1)[1]
+    try:
+        jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return True
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 # ✅ Log message when the app starts
@@ -60,7 +93,7 @@ async def load_models():
 
 # ✅ Async prediction route with logging
 @app.post("/predict/")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...), _auth: bool = Depends(verify_token)):
     logging.info(f"📥 Received file: {file.filename}")
 
     try:
